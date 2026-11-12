@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitor del vehículo</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --texto: #1c1f24; --suave: #5d6673; --borde: #d9dde3;
+    --ok: #1f8f4e; --mal: #c62828; --aviso: #b26a00; --azul: #1a5fb4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b; --card: #1d2227; --texto: #eceff3; --suave: #9aa4b2; --borde: #2f3640;
+      --ok: #4cc38a; --mal: #ff6b6b; --aviso: #ffb454; --azul: #6aa9ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--texto); }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; background: var(--card); border-bottom: 1px solid var(--borde); }
+  header h1 { font-size: 1.05rem; margin: 0; }
+  .estado-conexion { font-size: .8rem; color: var(--suave); }
+  .iconos button { background: none; border: 1px solid var(--borde); color: var(--texto); border-radius: 8px; padding: 6px 10px; font-size: .95rem; cursor: pointer; }
+  #mapa { height: 48vh; min-height: 260px; width: 100%; background: #cfd6dd; }
+  main { max-width: 760px; margin: 0 auto; padding: 12px; }
+  .tarjetas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tarjeta { background: var(--card); border: 1px solid var(--borde); border-radius: 12px; padding: 10px 12px; }
+  .tarjeta .etiqueta { font-size: .75rem; color: var(--suave); text-transform: uppercase; letter-spacing: .04em; }
+  .tarjeta .valor { font-size: 1.25rem; font-weight: 600; margin-top: 2px; word-break: break-word; }
+  .tarjeta .pequeno { font-size: .8rem; color: var(--suave); margin-top: 2px; }
+  .ancho { grid-column: 1 / -1; }
+  .ok { color: var(--ok); } .mal { color: var(--mal); } .aviso { color: var(--aviso); }
+  .botones { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  .botones button { border: 0; border-radius: 12px; padding: 16px 10px; font-size: 1.05rem; font-weight: 700; color: #fff; cursor: pointer; }
+  #btnCortar { background: var(--mal); }
+  #btnLiberar { background: var(--ok); }
+  #btnSaldo { padding: 12px; font-size: .95rem; background: var(--azul); grid-column: 1 / -1; }
+  .botones button:active { opacity: .8; }
+  #mensaje { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--borde); font-size: .9rem; min-height: 2.6em; }
+  a { color: var(--azul); }
+  footer { text-align: center; font-size: .75rem; color: var(--suave); padding: 14px; }
+  dialog { border: 1px solid var(--borde); border-radius: 14px; background: var(--card); color: var(--texto); max-width: 92vw; width: 420px; padding: 16px; }
+  dialog::backdrop { background: rgba(0, 0, 0, .5); }
+  dialog h2 { margin: 0 0 6px; font-size: 1.05rem; }
+  dialog p { font-size: .85rem; color: var(--suave); margin: 0 0 10px; }
+  dialog label { display: block; font-size: .8rem; margin: 10px 0 4px; }
+  dialog input { width: 100%; padding: 9px; border-radius: 8px; border: 1px solid var(--borde); background: var(--bg); color: var(--texto); font-size: 1rem; }
+  .fila-botones { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  .fila-botones button { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--borde); background: var(--card); color: var(--texto); font-size: .95rem; cursor: pointer; }
+  .fila-botones .principal { background: var(--azul); border-color: var(--azul); color: #fff; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Monitor del vehículo</h1>
+    <div class="estado-conexion" id="estadoConexion">Conectando…</div>
+  </div>
+  <div class="iconos">
+    <button id="btnActualizar" title="Actualizar ahora">⟳</button>
+    <button id="btnConfig" title="Configuración">⚙</button>
+  </div>
+</header>
+
+<div id="mapa"></div>
+
+<main>
+  <div class="tarjetas">
+    <div class="tarjeta"><div class="etiqueta">Velocidad</div><div class="valor" id="vVelocidad">—</div></div>
+    <div class="tarjeta"><div class="etiqueta">Relés de corte</div><div class="valor" id="vRele">—</div></div>
+    <div class="tarjeta"><div class="etiqueta">Última lectura</div><div class="valor" id="vHace">—</div><div class="pequeno" id="vSatelites"></div></div>
+    <div class="tarjeta"><div class="etiqueta">Posición</div><div class="valor" id="vPosicion" style="font-size:.95rem">—</div><div class="pequeno" id="vEnlaceMapa"></div></div>
+    <div class="tarjeta"><div class="etiqueta">Vibración (SW-420)</div><div class="valor" id="vVibracion">—</div><div class="pequeno" id="vVibracionHace"></div></div>
+    <div class="tarjeta"><div class="etiqueta">Sistema</div><div class="valor" id="vSistema">—</div><div class="pequeno" id="vSistemaDetalle"></div></div>
+    <div class="tarjeta"><div class="etiqueta">Puerta</div><div class="valor" id="vPuerta">—</div><div class="pequeno" id="vPuertaHace"></div></div>
+    <div class="tarjeta ancho"><div class="etiqueta">Último aviso del sistema</div><div class="pequeno" id="vAviso" style="font-size:.9rem;color:var(--texto)">—</div></div>
+  </div>
+
+  <div class="botones">
+    <button id="btnCortar">CORTAR</button>
+    <button id="btnLiberar">LIBERAR</button>
+    <button id="btnSaldo">Consultar saldo de la SIM</button>
+  </div>
+
+  <div id="mensaje">Listo.</div>
+</main>
+
+<footer>Datos: ThingSpeak · Mapa: © OpenStreetMap</footer>
+
+<dialog id="dlgConfig">
+  <h2>Configuración</h2>
+  <p>Estos datos se guardan solo en este navegador. No los compartas.</p>
+  <label for="cCanal">ID del canal (Channel ID)</label>
+  <input id="cCanal" inputmode="numeric" autocomplete="off">
+  <label for="cLectura">Read API Key del canal (déjalo vacío si el canal es público)</label>
+  <input id="cLectura" autocomplete="off">
+  <label for="cTbId">ID del TalkBack</label>
+  <input id="cTbId" inputmode="numeric" autocomplete="off">
+  <label for="cTbKey">API Key del TalkBack</label>
+  <input id="cTbKey" autocomplete="off">
+  <div class="fila-botones">
+    <button id="btnCancelar">Cancelar</button>
+    <button id="btnGuardar" class="principal">Guardar</button>
+  </div>
+</dialog>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var LS_KEY = 'monitorVehiculoCfg';
+  var REFRESCO_MS = 15000;      // cada cuanto se actualiza solo
+  var VEL_DETENIDO = 5;         // km/h: igual que en el firmware
+  var SIN_DATOS_MS = 90000;     // si la ultima lectura es mas vieja, se avisa
+
+  function $(id) { return document.getElementById(id); }
+
+  var cfg = {};
+  try { cfg = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch (e) { cfg = {}; }
+
+  var mapa, marcador, ruta;
+  var marcadorEnMapa = false;
+  var primeraPosicion = true;
+  var ultimaVelocidad = 0;
+  var ultimaPosicion = null;
+  var sistemaDormido = false;   // true si el ESP32 aviso que entraba en modo sueño
+
+  // ---------- Mapa ----------
+  function iniciarMapa() {
+    mapa = L.map('mapa').setView([0, 0], 2);
+
+    // Añade tu clave al final de la URL con ?key=
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=cb1_4vll_1_b55b05b0e1388440a333df99', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 20
+    }).addTo(mapa);
+
+    ruta = L.polyline([], { color: '#1a5fb4', weight: 3, opacity: 0.7 }).addTo(mapa);
+    marcador = L.circleMarker([0, 0], { radius: 10, color: '#ffffff', weight: 3, fillColor: '#c62828', fillOpacity: 1 });
+  }
+
+  // ---------- Utilidades ----------
+  function mensaje(texto, clase) {
+    var el = $('mensaje');
+    el.textContent = texto;
+    el.className = clase || '';
+  }
+
+  function hace(ms) {
+    var s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return 'hace ' + s + ' s';
+    var m = Math.round(s / 60);
+    if (m < 60) return 'hace ' + m + ' min';
+    var h = Math.round(m / 60);
+    if (h < 48) return 'hace ' + h + ' h';
+    return 'hace ' + Math.round(h / 24) + ' días';
+  }
+
+  function ultimoCon(feeds, campo) {
+    for (var i = feeds.length - 1; i >= 0; i--) {
+      if (feeds[i][campo] !== null && feeds[i][campo] !== undefined && feeds[i][campo] !== '') return feeds[i];
+    }
+    return null;
+  }
+
+  // ---------- Lectura de ThingSpeak ----------
+  function procesar(feeds) {
+    if (!feeds.length) {
+      mensaje('El canal todavía no tiene datos.', 'aviso');
+      return;
+    }
+
+    var ultimo = feeds[feeds.length - 1];
+    var edad = Date.now() - Date.parse(ultimo.created_at);
+    var sinDatos = edad > SIN_DATOS_MS;
+
+    // Campo 7: bit 1 = sistema activo (0 = durmiendo)
+    var f7 = ultimoCon(feeds, 'field7');
+    var v7 = f7 ? (parseInt(f7.field7, 10) || 0) : 1;
+    sistemaDormido = f7 ? ((v7 & 1) === 0) : false;
+
+    $('vHace').textContent = hace(edad);
+    $('vHace').className = 'valor ' + ((sinDatos && !sistemaDormido) ? 'aviso' : 'ok');
+    $('estadoConexion').textContent = sistemaDormido ? 'Sistema en reposo (modo sueño)'
+      : (sinDatos ? 'Sin datos recientes del vehículo' : 'Vehículo en línea');
+
+    var vs = $('vSistema'), vd = $('vSistemaDetalle');
+    if (sistemaDormido) {
+      vs.textContent = 'En reposo'; vs.className = 'valor aviso';
+      vd.textContent = 'Solo vigila vibración y puerta';
+    } else if (sinDatos) {
+      vs.textContent = 'Sin señal'; vs.className = 'valor mal';
+      vd.textContent = 'No llegan datos nuevos';
+    } else {
+      vs.textContent = 'Activo'; vs.className = 'valor ok';
+      vd.textContent = '';
+    }
+
+    // Campo 6: bit 1 = vibracion, bit 2 = puerta abierta ahora, bit 3 = la puerta se abrio desde el envio anterior
+    function bits6(f) { return parseInt(f.field6, 10) || 0; }
+    var fvib = ultimoCon(feeds, 'field6');
+    var ultimaVib = null, ultimaPuerta = null;
+    for (var j = feeds.length - 1; j >= 0 && (!ultimaVib || !ultimaPuerta); j--) {
+      var b = bits6(feeds[j]);
+      if (!ultimaVib && (b & 1)) ultimaVib = feeds[j];
+      if (!ultimaPuerta && (b & 6)) ultimaPuerta = feeds[j];
+    }
+
+    var vv = $('vVibracion');
+    if (sistemaDormido) {
+      vv.textContent = 'Vigilando'; vv.className = 'valor ok';
+    } else if (sinDatos || !fvib) {
+      vv.textContent = sinDatos ? 'Sin datos' : '—'; vv.className = 'valor aviso';
+    } else if (bits6(fvib) & 1) {
+      vv.textContent = 'DETECTADA'; vv.className = 'valor mal';
+    } else {
+      vv.textContent = 'Sin vibración'; vv.className = 'valor ok';
+    }
+    $('vVibracionHace').textContent = ultimaVib
+      ? 'Última: ' + hace(Date.now() - Date.parse(ultimaVib.created_at))
+      : 'Sin vibraciones en el historial reciente';
+
+    var vp = $('vPuerta');
+    if (sistemaDormido) {
+      vp.textContent = 'Vigilando'; vp.className = 'valor ok';
+    } else if (sinDatos || !fvib) {
+      vp.textContent = sinDatos ? 'Sin datos' : '—'; vp.className = 'valor aviso';
+    } else if (bits6(fvib) & 2) {
+      vp.textContent = 'ABIERTA'; vp.className = 'valor mal';
+    } else if (bits6(fvib) & 4) {
+      vp.textContent = 'Se abrió'; vp.className = 'valor aviso';
+    } else {
+      vp.textContent = 'Cerrada'; vp.className = 'valor ok';
+    }
+    $('vPuertaHace').textContent = ultimaPuerta
+      ? 'Última apertura: ' + hace(Date.now() - Date.parse(ultimaPuerta.created_at))
+      : 'Sin aperturas en el historial reciente';
+
+    // Posicion y recorrido
+    var puntos = [];
+    feeds.forEach(function (f) {
+      var la = parseFloat(f.field1), lo = parseFloat(f.field2);
+      if (!isNaN(la) && !isNaN(lo)) puntos.push([la, lo]);
+    });
+
+    if (puntos.length) {
+      var p = puntos[puntos.length - 1];
+      ultimaPosicion = p;
+      ruta.setLatLngs(puntos);
+      marcador.setLatLng(p);
+      if (!marcadorEnMapa) { marcador.addTo(mapa); marcadorEnMapa = true; }
+      if (primeraPosicion) { mapa.setView(p, 17); primeraPosicion = false; }
+      $('vPosicion').textContent = p[0].toFixed(6) + ', ' + p[1].toFixed(6);
+      $('vEnlaceMapa').innerHTML = '<a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' + p[0] + ',' + p[1] + '">Abrir en Google Maps</a>';
+    } else {
+      $('vPosicion').textContent = 'Sin posición todavía';
+      $('vEnlaceMapa').textContent = '';
+    }
+
+    // Velocidad
+    var fv = ultimoCon(feeds, 'field3');
+    if (fv) {
+      ultimaVelocidad = parseFloat(fv.field3) || 0;
+      $('vVelocidad').textContent = ultimaVelocidad.toFixed(1) + ' km/h';
+    }
+
+    // Satelites
+    var fs = ultimoCon(feeds, 'field5');
+    $('vSatelites').textContent = fs ? fs.field5 + ' satélites' : '';
+
+    // Rele
+    var fr = ultimoCon(feeds, 'field4');
+    if (fr) {
+      var activo = String(fr.field4).trim() === '1';
+      $('vRele').textContent = activo ? 'CORTADO' : 'LIBRE';
+      $('vRele').className = 'valor ' + (activo ? 'mal' : 'ok');
+    }
+
+    // Ultimo aviso (campo status)
+    var fa = null;
+    for (var i = feeds.length - 1; i >= 0; i--) {
+      if (feeds[i].status) { fa = feeds[i]; break; }
+    }
+    $('vAviso').textContent = fa ? fa.status + ' (' + hace(Date.now() - Date.parse(fa.created_at)) + ')' : '—';
+  }
+
+  function actualizar() {
+    if (!cfg.canal) { abrirConfig(); return; }
+    var url = 'https://api.thingspeak.com/channels/' + encodeURIComponent(cfg.canal) + '/feeds.json?results=60&status=true';
+    if (cfg.lectura) url += '&api_key=' + encodeURIComponent(cfg.lectura);
+
+    fetch(url, { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('respuesta ' + r.status + ' (revisa el ID y la Read API Key)');
+        return r.json();
+      })
+      .then(function (d) { procesar(d.feeds || []); })
+      .catch(function (e) {
+        $('estadoConexion').textContent = 'Error al leer los datos';
+        mensaje('No se pudo leer ThingSpeak: ' + e.message, 'mal');
+      });
+  }
+
+  // ---------- Comandos (TalkBack) ----------
+  function enviarComando(comando) {
+    if (!cfg.tbId || !cfg.tbKey) { abrirConfig(); return; }
+    var cuerpo = new URLSearchParams();
+    cuerpo.append('api_key', cfg.tbKey);
+    cuerpo.append('command_string', comando);
+
+    fetch('https://api.thingspeak.com/talkbacks/' + encodeURIComponent(cfg.tbId) + '/commands', {
+      method: 'POST',
+      body: cuerpo,
+      mode: 'no-cors'
+    })
+      .then(function () {
+        if (sistemaDormido) {
+          mensaje('Comando ' + comando + ' enviado, pero el sistema está en reposo: quedará en cola y se ejecutará cuando despierte (por vibración o por la puerta).', 'aviso');
+        } else {
+          mensaje('Comando ' + comando + ' enviado. El navegador no puede confirmar que ThingSpeak lo aceptó: el vehículo lo ejecuta en su próximo ciclo (hasta ~40 s) y verás el cambio en «Relés de corte».', '');
+        }
+        setTimeout(actualizar, 25000);
+        setTimeout(actualizar, 45000);
+      })
+      .catch(function (e) {
+        mensaje('No se pudo enviar el comando: ' + e.message, 'mal');
+      });
+  }
+
+  // ---------- Configuracion ----------
+  function abrirConfig() {
+    $('cCanal').value = cfg.canal || '';
+    $('cLectura').value = cfg.lectura || '';
+    $('cTbId').value = cfg.tbId || '';
+    $('cTbKey').value = cfg.tbKey || '';
+    $('dlgConfig').showModal();
+  }
+
+  $('btnConfig').addEventListener('click', abrirConfig);
+  $('btnCancelar').addEventListener('click', function () { $('dlgConfig').close(); });
+  $('btnGuardar').addEventListener('click', function () {
+    cfg = {
+      canal: $('cCanal').value.trim(),
+      lectura: $('cLectura').value.trim(),
+      tbId: $('cTbId').value.trim(),
+      tbKey: $('cTbKey').value.trim()
+    };
+    try { localStorage.setItem(LS_KEY, JSON.stringify(cfg)); } catch (e) {}
+    $('dlgConfig').close();
+    primeraPosicion = true;
+    actualizar();
+  });
+
+  // ---------- Botones ----------
+  $('btnActualizar').addEventListener('click', actualizar);
+
+  $('btnCortar').addEventListener('click', function () {
+    var texto = '¿Cortar el motor?\n\nHacelo solo con el vehículo detenido.';
+    if (ultimaVelocidad >= VEL_DETENIDO) {
+      texto += '\n\nATENCIÓN: el vehículo marcaba ' + ultimaVelocidad.toFixed(1) + ' km/h. El sistema esperará a que se detenga para cortar.';
+    }
+    if (confirm(texto)) enviarComando('CORTAR');
+  });
+
+  $('btnLiberar').addEventListener('click', function () {
+    if (confirm('¿Liberar el motor (desactivar el corte)?')) enviarComando('LIBERAR');
+  });
+
+  $('btnSaldo').addEventListener('click', function () { enviarComando('SALDO'); });
+
+  // ---------- Inicio ----------
+  iniciarMapa();
+  actualizar();
+  setInterval(actualizar, REFRESCO_MS);
+})();
+</script>
+</body>
+</html>
